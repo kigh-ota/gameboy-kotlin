@@ -88,10 +88,7 @@ class DEC8(private val r: Ref8) : Instruction {
 
 // 16-bit arithmetic
 class ADD_HL16(private val rr: Ref16) : Instruction {
-    override fun execute(em: Emulator): Int = when (rr) {
-        BC, DE, HL, SP -> em.addHL16(rr)
-        AF, nn -> throw RuntimeException()
-    }
+    override fun execute(em: Emulator) = em.addHL16(rr)
 }
 
 class ADD_SP_n() : Instruction {
