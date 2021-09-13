@@ -896,15 +896,8 @@ class Emulator {
      * @return number of cycles
      */
     private fun fetchAndExecuteInstruction(): Int {
-        val opcode = read8()
-        val instruction = getInstruction(opcode)
-        return when (instruction) {
-            is PREFIX_CB -> {
-                val opcode2 = read8()
-                getInstructionCB(opcode2).execute(this)
-            }
-            else -> instruction.execute(this)
-        }
+        val instruction = getInstruction(::read8)
+        return instruction(this)
     }
 }
 
