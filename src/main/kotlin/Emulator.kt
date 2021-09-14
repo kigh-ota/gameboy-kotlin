@@ -112,18 +112,284 @@ class Emulator {
 
     private val log = LoggerFactory.getLogger(javaClass.name)
 
+    private var cycleCounter: Long = 0L
+
     private inner class Memory {
-        operator fun get(addr: UShort): UByte = when (addr) {
-            in 0x0000u..0x7FFFu -> rom!![addr.toInt()]
+        /**
+         * https://gbdev.io/pandocs/Memory_Map.html
+         * 0000-3FFF	16 KiB ROM bank 00	From cartridge, usually a fixed bank
+         * 4000	7FFF	16 KiB ROM Bank 01~NN	From cartridge, switchable bank via mapper (if any)
+         * 8000	9FFF	8 KiB Video RAM (VRAM)	In CGB mode, switchable bank 0/1
+         * A000	BFFF	8 KiB External RAM	From cartridge, switchable bank if any
+         * C000	CFFF	4 KiB Work RAM (WRAM)
+         * D000	DFFF	4 KiB Work RAM (WRAM)	In CGB mode, switchable bank 1~7
+         * E000	FDFF	Mirror of C000~DDFF (ECHO RAM)	Nintendo says use of this area is prohibited.
+         * FE00	FE9F	Sprite attribute table (OAM)
+         * FEA0	FEFF	Not Usable	Nintendo says use of this area is prohibited
+         * FF00	FF7F	I/O Registers
+         * FF80	FFFE	High RAM (HRAM)
+         * FFFF	FFFF	Interrupt Enable register (IE)
+         */
+
+        private val wram0 = UByteArray(0x1000)
+        private val wram1 = UByteArray(0x1000)
+
+        // I/O registers
+        private var P1: UByte = 0x00u
+        private var SB: UByte = 0x00u
+        private var SC: UByte = 0x00u
+        private var DIV: UByte = 0x00u
+        private var TIMA: UByte = 0x00u
+        private var TMA: UByte = 0x00u
+        private var TAC: UByte = 0x00u
+        private var IF: UByte = 0x00u
+        private var NR10: UByte = 0x00u
+        private var NR11: UByte = 0x00u
+        private var NR12: UByte = 0x00u
+        private var NR13: UByte = 0x00u
+        private var NR14: UByte = 0x00u
+        private var NR21: UByte = 0x00u
+        private var NR22: UByte = 0x00u
+        private var NR23: UByte = 0x00u
+        private var NR24: UByte = 0x00u
+        private var NR30: UByte = 0x00u
+        private var NR31: UByte = 0x00u
+        private var NR32: UByte = 0x00u
+        private var NR33: UByte = 0x00u
+        private var NR34: UByte = 0x00u
+        private var NR41: UByte = 0x00u
+        private var NR42: UByte = 0x00u
+        private var NR43: UByte = 0x00u
+        private var NR44: UByte = 0x00u
+        private var NR50: UByte = 0x00u
+        private var NR51: UByte = 0x00u
+        private var NR52: UByte = 0x00u
+        private var LCDC: UByte = 0x00u
+        private var STAT: UByte = 0x00u
+        private var SCY: UByte = 0x00u
+        private var SCX: UByte = 0x00u
+        private var LY: UByte = 0x00u
+        private var LYC: UByte = 0x00u
+        private var DMA: UByte = 0x00u
+        private var BGP: UByte = 0x00u
+        private var OBP0: UByte = 0x00u
+        private var OBP1: UByte = 0x00u
+        private var WY: UByte = 0x00u
+        private var WX: UByte = 0x00u
+        private var KEY1: UByte = 0x00u
+        private var VBK: UByte = 0x00u
+        private var HDMA1: UByte = 0x00u
+        private var HDMA2: UByte = 0x00u
+        private var HDMA3: UByte = 0x00u
+        private var HDMA4: UByte = 0x00u
+        private var HDMA5: UByte = 0x00u
+        private var RP: UByte = 0x00u
+        private var BCPS: UByte = 0x00u
+        private var BCPD: UByte = 0x00u
+        private var OCPS: UByte = 0x00u
+        private var OCPD: UByte = 0x00u
+        private var SVBK: UByte = 0x00u
+        private var IE: UByte = 0x00u
+
+        operator fun get(addr: UShort): UByte = when (addr.toInt()) {
+            in 0x0000..0x7FFF -> rom!![addr.toInt()]
+            in 0xC000..0xCFFF -> wram0[addr.toInt() - 0xC000]
+            in 0xD000..0xDFFF -> wram1[addr.toInt() - 0xD000]
+            in 0xFF00..0xFF7F, 0xFFFF -> getIORegisters(addr)
             else -> TODO()
         }
 
-        operator fun set(addr: UShort, value: UByte) {
-            TODO()
+        operator fun set(addr: UShort, value: UByte) = when (addr.toInt()) {
+            in 0xC000..0xCFFF -> wram0[addr.toInt() - 0xC000] = value
+            in 0xD000..0xDFFF-> wram1[addr.toInt() - 0xD000] = value
+            in 0xFF00..0xFF7F, 0xFFFF -> setIORegisters(addr, value)
+            else -> TODO()
+        }
+
+        private fun getIORegisters(addr: UShort) = when(addr.toInt()) {
+            0xFF00 -> P1
+            0xFF01 -> SB
+            0xFF02 -> SC
+            0xFF04 -> DIV
+            0xFF05 -> TIMA
+            0xFF06 -> TMA
+            0xFF07 -> TAC
+            0xFF0F -> IF
+            0xFF10 -> NR10
+            0xFF11 -> NR11
+            0xFF12 -> NR12
+            0xFF13 -> NR13
+            0xFF14 -> NR14
+            0xFF16 -> NR21
+            0xFF17 -> NR22
+            0xFF18 -> NR23
+            0xFF19 -> NR24
+            0xFF1A -> NR30
+            0xFF1B -> NR31
+            0xFF1C -> NR32
+            0xFF1D -> NR33
+            0xFF1E -> NR34
+            0xFF20 -> NR41
+            0xFF21 -> NR42
+            0xFF22 -> NR43
+            0xFF23 -> NR44
+            0xFF24 -> NR50
+            0xFF25 -> NR51
+            0xFF26 -> NR52
+            0xFF40 -> LCDC
+            0xFF41 -> STAT
+            0xFF42 -> SCY
+            0xFF43 -> SCX
+            0xFF44 -> LY
+            0xFF45 -> LYC
+            0xFF46 -> DMA
+            0xFF47 -> BGP
+            0xFF48 -> OBP0
+            0xFF49 -> OBP1
+            0xFF4A -> WY
+            0xFF4B -> WX
+            0xFF4D -> KEY1
+            0xFF4F -> VBK
+            0xFF51 -> HDMA1
+            0xFF52 -> HDMA2
+            0xFF53 -> HDMA3
+            0xFF54 -> HDMA4
+            0xFF55 -> HDMA5
+            0xFF56 -> RP
+            0xFF68 -> BCPS
+            0xFF69 -> BCPD
+            0xFF6A -> OCPS
+            0xFF6B -> OCPD
+            0xFF70 -> SVBK
+            0xFFFF -> IE
+            else -> throw IllegalArgumentException()
+        }
+
+        private fun setIORegisters(addr: UShort, value: UByte) = when(addr.toInt()) {
+            0xFF00 -> P1 = value
+            0xFF01 -> SB = value
+            0xFF02 -> SC = value
+            0xFF04 -> DIV = value
+            0xFF05 -> TIMA = value
+            0xFF06 -> TMA = value
+            0xFF07 -> TAC = value
+            0xFF0F -> IF = value
+            0xFF10 -> NR10 = value
+            0xFF11 -> NR11 = value
+            0xFF12 -> NR12 = value
+            0xFF13 -> NR13 = value
+            0xFF14 -> NR14 = value
+            0xFF16 -> NR21 = value
+            0xFF17 -> NR22 = value
+            0xFF18 -> NR23 = value
+            0xFF19 -> NR24 = value
+            0xFF1A -> NR30 = value
+            0xFF1B -> NR31 = value
+            0xFF1C -> NR32 = value
+            0xFF1D -> NR33 = value
+            0xFF1E -> NR34 = value
+            0xFF20 -> NR41 = value
+            0xFF21 -> NR42 = value
+            0xFF22 -> NR43 = value
+            0xFF23 -> NR44 = value
+            0xFF24 -> NR50 = value
+            0xFF25 -> NR51 = value
+            0xFF26 -> NR52 = value
+            0xFF40 -> LCDC = value
+            0xFF41 -> STAT = value
+            0xFF42 -> SCY = value
+            0xFF43 -> SCX = value
+            0xFF44 -> LY = value
+            0xFF45 -> LYC = value
+            0xFF46 -> DMA = value
+            0xFF47 -> BGP = value
+            0xFF48 -> OBP0 = value
+            0xFF49 -> OBP1 = value
+            0xFF4A -> WY = value
+            0xFF4B -> WX = value
+            0xFF4D -> KEY1 = value
+            0xFF4F -> VBK = value
+            0xFF51 -> HDMA1 = value
+            0xFF52 -> HDMA2 = value
+            0xFF53 -> HDMA3 = value
+            0xFF54 -> HDMA4 = value
+            0xFF55 -> HDMA5 = value
+            0xFF56 -> RP = value
+            0xFF68 -> BCPS = value
+            0xFF69 -> BCPD = value
+            0xFF6A -> OCPS = value
+            0xFF6B -> OCPD = value
+            0xFF70 -> SVBK = value
+            0xFFFF -> IE = value
+            else -> throw IllegalArgumentException()
+        }
+
+        fun initialize() {
+            wram0.fill(0u)
+            wram1.fill(0u)
+            initializeHardwareRegisters()
+        }
+
+        private fun initializeHardwareRegisters() {
+            P1 = 0xCFu
+            SB = 0x00u
+            SC = 0x7Eu
+            DIV = 0xABu
+            TIMA = 0x00u
+            TMA = 0x00u
+            TAC = 0xF8u
+            IF = 0xE1u
+            NR10 = 0x80u
+            NR11 = 0xBFu
+            NR12 = 0xF3u
+            NR13 = 0xFFu
+            NR14 = 0xBFu
+            NR21 = 0x3Fu
+            NR22 = 0x00u
+            NR23 = 0xFFu
+            NR24 = 0xBFu
+            NR30 = 0x7Fu
+            NR31 = 0xFFu
+            NR32 = 0x9Fu
+            NR33 = 0xFFu
+            NR34 = 0xBFu
+            NR41 = 0xFFu
+            NR42 = 0x00u
+            NR43 = 0x00u
+            NR44 = 0xBFu
+            NR50 = 0x77u
+            NR51 = 0xF3u
+            NR52 = 0xF1u
+            LCDC = 0x91u
+            STAT = 0x85u
+            SCY = 0x00u
+            SCX = 0x00u
+            LY = 0x00u
+            LYC = 0x00u
+            DMA = 0xFFu
+            BGP = 0xFCu
+            OBP0 = 0xFFu
+            OBP1 = 0xFFu
+            WY = 0xFFu
+            WX = 0xFFu
+            KEY1 = 0xFFu
+            VBK = 0xFFu
+            HDMA1 = 0xFFu
+            HDMA2 = 0xFFu
+            HDMA3 = 0xFFu
+            HDMA4 = 0xFFu
+            HDMA5 = 0xFFu
+            RP = 0xFFu
+            BCPS = 0xFFu
+            BCPD = 0xFFu
+            OCPS = 0xFFu
+            OCPD = 0xFFu
+            SVBK = 0xFFu
+            IE = 0x00u
         }
     }
 
-    private val mem = Memory()
+    private val memory = Memory()
 
     private var rom: UByteArray? = null
 
@@ -162,9 +428,9 @@ class Emulator {
             C = lo8(value)
         }
     private var refBC: UByte
-        get() = mem[BC]
+        get() = memory[BC]
         set(value) {
-            mem[BC] = value
+            memory[BC] = value
         }
     private var D: UByte = 0x00u
     private var E: UByte = 0x00u
@@ -175,9 +441,9 @@ class Emulator {
             E = lo8(value)
         }
     private var refDE: UByte
-        get() = mem[DE]
+        get() = memory[DE]
         set(value) {
-            mem[DE] = value
+            memory[DE] = value
         }
     private var H: UByte = 0x00u
     private var L: UByte = 0x00u
@@ -188,22 +454,22 @@ class Emulator {
             L = lo8(value)
         }
     private var refHL: UByte
-        get() = mem[HL]
+        get() = memory[HL]
         set(value) {
-            mem[HL] = value
+            memory[HL] = value
         }
     private var SP: UShort = 0x0000u
     private fun pushStack(addr: UShort) {
         SP--
-        mem[SP] = hi8(addr)
+        memory[SP] = hi8(addr)
         SP--
-        mem[SP] = lo8(addr)
+        memory[SP] = lo8(addr)
     }
 
     private fun popStack(): UShort {
-        val lo = mem[SP]
+        val lo = memory[SP]
         SP++
-        val hi = mem[SP]
+        val hi = memory[SP]
         SP++
         return u16(hi, lo)
     }
@@ -231,9 +497,9 @@ class Emulator {
             Ref8.refBC -> refBC
             Ref8.refDE -> refDE
             Ref8.n -> read8()
-            Ref8.refNN -> mem[read16()]
-            Ref8.refC -> mem[u16(0xFFu, C)]
-            Ref8.refN -> mem[u16(0xFFu, read8())]
+            Ref8.refNN -> memory[read16()]
+            Ref8.refC -> memory[u16(0xFFu, C)]
+            Ref8.refN -> memory[u16(0xFFu, read8())]
         }
     }
 
@@ -250,9 +516,9 @@ class Emulator {
             Ref8.refBC -> refBC = value
             Ref8.refDE -> refDE = value
             Ref8.n -> throw IllegalArgumentException()
-            Ref8.refNN -> mem[read16()] = value
-            Ref8.refC -> mem[u16(0xFFu, C)] = value
-            Ref8.refN -> mem[u16(0xFFu, read8())] = value
+            Ref8.refNN -> memory[read16()] = value
+            Ref8.refC -> memory[u16(0xFFu, C)] = value
+            Ref8.refN -> memory[u16(0xFFu, read8())] = value
         }
     }
 
@@ -270,7 +536,11 @@ class Emulator {
         Ref16.DE -> DE = value
         Ref16.HL -> HL = value
         Ref16.SP -> SP = value
-        Ref16.AF, Ref16.nn -> throw IllegalArgumentException()
+        Ref16.AF -> {
+            A = hi8(value)
+            F = lo8(value)
+        }
+        Ref16.nn -> throw IllegalArgumentException()
     }
 
     private fun add16(ref16: Ref16, v: UShort): Pair<Boolean, Boolean> {
@@ -319,6 +589,7 @@ class Emulator {
 
     // Instructions
     fun ld8(dst: Ref8, src: Ref8): Int {
+        log.debug("LD8\t${dst.name}\t${src.name}")
         set8(dst, get8(src))
         return when (src) {
             Ref8.refBC, Ref8.refDE, Ref8.refHL -> when (dst) {
@@ -334,6 +605,7 @@ class Emulator {
                 Ref8.B, Ref8.C, Ref8.D, Ref8.E, Ref8.H, Ref8.L, Ref8.A -> 4
                 Ref8.refHL, Ref8.refBC, Ref8.refDE, Ref8.refC -> 8
                 Ref8.refN -> 12
+                Ref8.refNN -> 16
                 else -> throw IllegalArgumentException()
             }
             Ref8.n -> when (dst) {
@@ -357,6 +629,7 @@ class Emulator {
     }
 
     fun ldi8(dst: Ref8, src: Ref8): Int {
+        log.debug("LDI8\t${dst.name}\t${src.name}")
         ld8(dst, src)
         inc16(Ref16.HL)
         return when {
@@ -366,6 +639,7 @@ class Emulator {
     }
 
     fun ldd8(dst: Ref8, src: Ref8): Int {
+        log.debug("LDD8\t${dst.name}\t${src.name}")
         ld8(dst, src)
         dec16(Ref16.HL)
         return when {
@@ -375,6 +649,7 @@ class Emulator {
     }
 
     fun ld16(dst: Ref16, src: Ref16): Int {
+        log.debug("LD16\t${dst.name}\t${src.name}")
         set16(dst, get16(src))
         return when (src) {
             Ref16.SP -> when (dst) {
@@ -386,7 +661,7 @@ class Emulator {
                 Ref16.AF, Ref16.nn -> throw IllegalArgumentException()
             }
             Ref16.BC, Ref16.DE, Ref16.AF -> throw IllegalArgumentException()
-            Ref16.HL -> when(dst) {
+            Ref16.HL -> when (dst) {
                 Ref16.SP -> 8
                 else -> throw IllegalArgumentException()
             }
@@ -406,15 +681,17 @@ class Emulator {
     }
 
     fun push16(ref16: Ref16): Int {
+        log.debug("PUSH16\t${ref16.name}")
         val addr = SP
         val nn = get16(ref16)
-        mem[addr] = lo8(nn)
-        mem[add16(addr, 1u).first] = hi8(nn)
+        memory[addr] = lo8(nn)
+        memory[add16(addr, 1u).first] = hi8(nn)
         sub16(Ref16.SP, 2u)
         return 16
     }
 
     fun pop16(ref16: Ref16): Int {
+        log.debug("POP16\t${ref16.name}")
         set16(ref16, SP)
         add16(Ref16.SP, 2u)
         return 16
@@ -502,6 +779,7 @@ class Emulator {
 
     // z03-
     fun inc8(r: Ref8): Int {
+        log.debug("INC8\t${r.name}")
         val (res, _, halfCarry) = add8(get8(r), 1u)
         set8(r, res)
         flagZ = res.equals(0u)
@@ -516,6 +794,7 @@ class Emulator {
 
     // z13-
     fun dec8(r: Ref8): Int {
+        log.debug("DEC8\t${r.name}")
         val (res, _, halfCarry) = sub8(get8(r), 1u)
         set8(r, res)
         flagZ = res.equals(0u)
@@ -815,6 +1094,7 @@ class Emulator {
 
     fun jp(fc: FlagCondition): Int {
         val addr = read16()
+        log.debug("JP\t${fc.name}\t${addr.toUInt().toString(16)}")
         if (evaluate(fc)) {
             PC = addr
             return 16
@@ -872,9 +1152,13 @@ class Emulator {
 
     fun start(romFile: File) {
         initializeRegisters()
-        // initialize memory
+        memory.initialize()
         loadROM(romFile)
-        fetchAndExecuteInstruction()
+        while (true) {
+            fetchAndExecuteInstruction()
+
+            // TODO divider and timer
+        }
     }
 
     private fun loadROM(romFile: File) {
@@ -893,25 +1177,65 @@ class Emulator {
         L = 0x4Du
         SP = 0xFFFEu
         PC = 0x0100u
+
+        cycleCounter = 0L
     }
 
     private fun read16(): UShort {
-        val lo = read8()
-        val hi = read8()
-        return u16(hi, lo)
+        val lo = memory[PC]
+        PC++
+        val hi = memory[PC]
+        PC++
+        return u16(hi, lo).also {
+            log.debug(String.format("\tnn=%04X", it.toInt()))
+        }
     }
 
     private fun read8(): UByte {
-        val b = mem[PC]
+        val b = memory[PC]
         PC++
-        return b
+        return b.also {
+            log.debug(String.format("\tn=%02X", it.toInt()))
+        }
     }
 
     /**
      * @return number of cycles
      */
     private fun fetchAndExecuteInstruction(): Int {
-        val instruction = getInstruction(::read8)
-        return instruction(this)
+        val currentPC = PC
+
+        val (instruction, opcode, opcode2) = getInstruction(::read8)
+        if (log.isDebugEnabled) {
+            val mnemonic = instruction.javaClass.name.split("$")[1]
+            log.debug(
+                listOf(
+                    currentPC.toUInt().toString(16),
+                    opcode.toUInt().toString(16),
+                    opcode2?.toUInt()?.toString(16) ?: "",
+                    mnemonic
+                ).joinToString("\t")
+            )
+            log.debug(
+                listOf(
+                    "A=${String.format("%02X", A.toInt())}",
+                    "Z=${if (flagZ) 1 else 0}",
+                    "N=${if (flagN) 1 else 0}",
+                    "H=${if (flagH) 1 else 0}",
+                    "C=${if (flagC) 1 else 0}",
+                    "B=${String.format("%02X", B.toInt())}",
+                    "C=${String.format("%02X", C.toInt())}",
+                    "D=${String.format("%02X", D.toInt())}",
+                    "E=${String.format("%02X", E.toInt())}",
+                    "H=${String.format("%02X", H.toInt())}",
+                    "L=${String.format("%02X", L.toInt())}",
+                    "SP=${String.format("%04X", SP.toInt())}",
+                    "PC=${String.format("%04X", PC.toInt())}"
+                ).joinToString(" ")
+            )
+        }
+        val cycles = instruction(this)
+        cycleCounter += cycles
+        return cycles
     }
 }

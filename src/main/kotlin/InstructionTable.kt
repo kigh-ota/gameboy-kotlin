@@ -70,12 +70,17 @@ private fun SET(r: Ref8, b: Int) = fun(em: Emulator) = em.set(r, b)
 private fun JP(fc: FlagCondition) = fun(em: Emulator) = em.jp(fc)
 private fun JP_HL() = fun(em: Emulator) = em.jpHL()
 
-fun getInstruction(opcodeReader: () -> UByte): (Emulator) -> Int {
+fun getInstruction(opcodeReader: () -> UByte): Triple<(Emulator) -> Int, UByte, UByte?> {
     val opcode = opcodeReader()
-    return when (opcode.toUInt()) {
-        0xCBu -> INSTRUCTIONS_CB[opcode.toInt()]
+    var opcode2: UByte? = null
+    val instruction = when (opcode.toUInt()) {
+        0xCBu -> {
+            opcode2 = opcodeReader()
+            INSTRUCTIONS_CB[opcode2.toInt()]
+        }
         else -> INSTRUCTIONS[opcode.toInt()]
     }
+    return Triple(instruction, opcode, opcode2)
 }
 
 internal val INSTRUCTIONS = arrayOf(
