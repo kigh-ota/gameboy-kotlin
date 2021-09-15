@@ -1,10 +1,15 @@
 plugins {
     kotlin("jvm") version "1.5.10"
     id("org.openjfx.javafxplugin") version "0.0.8"
+    application
 }
 
 javafx {
     modules("javafx.controls")
+}
+
+application {
+    mainClass.set("MainKt")
 }
 
 group = "org.example"

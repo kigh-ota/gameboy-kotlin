@@ -1,3 +1,5 @@
+import Emulator.CartridgeHeader.CartridgeType.MBC1
+import Emulator.CartridgeHeader.CartridgeType.`ROM ONLY`
 import org.slf4j.LoggerFactory
 import java.io.File
 
@@ -8,6 +10,8 @@ class Emulator {
         private const val BIT_N = 6
         private const val BIT_H = 5
         private const val BIT_C = 4
+
+        private const val MEMORY_BANK_SIZE = 0x4000
     }
 
     private val log = LoggerFactory.getLogger(javaClass.name)
@@ -17,18 +21,18 @@ class Emulator {
     private inner class Memory {
         /**
          * https://gbdev.io/pandocs/Memory_Map.html
-         * 0000-3FFF	16 KiB ROM bank 00	From cartridge, usually a fixed bank
-         * 4000	7FFF	16 KiB ROM Bank 01~NN	From cartridge, switchable bank via mapper (if any)
-         * 8000	9FFF	8 KiB Video RAM (VRAM)	In CGB mode, switchable bank 0/1
-         * A000	BFFF	8 KiB External RAM	From cartridge, switchable bank if any
-         * C000	CFFF	4 KiB Work RAM (WRAM)
-         * D000	DFFF	4 KiB Work RAM (WRAM)	In CGB mode, switchable bank 1~7
-         * E000	FDFF	Mirror of C000~DDFF (ECHO RAM)	Nintendo says use of this area is prohibited.
-         * FE00	FE9F	Sprite attribute table (OAM)
-         * FEA0	FEFF	Not Usable	Nintendo says use of this area is prohibited
-         * FF00	FF7F	I/O Registers
-         * FF80	FFFE	High RAM (HRAM)
-         * FFFF	FFFF	Interrupt Enable register (IE)
+         * 0000-3FFF	16 KiB ROM bank X0
+         * 4000-7FFF	16 KiB ROM Bank 01-7F
+         * 8000-9FFF	8 KiB Video RAM (VRAM)	In CGB mode, switchable bank 0/1
+         * A000-BFFF	8 KiB RAM bank 00-03
+         * C000-CFFF	4 KiB Work RAM (WRAM)
+         * D000-DFFF	4 KiB Work RAM (WRAM)	In CGB mode, switchable bank 1~7
+         * E000-FDFF	Mirror of C000~DDFF (ECHO RAM)	Nintendo says use of this area is prohibited.
+         * FE00-FE9F	Sprite attribute table (OAM)
+         * FEA0-FEFF	Not Usable	Nintendo says use of this area is prohibited
+         * FF00-FF7F	I/O Registers
+         * FF80-FFFE	High RAM (HRAM)
+         * FFFF     	Interrupt Enable register (IE)
          */
 
         private val wram0 = UByteArray(0x1000)
@@ -91,18 +95,63 @@ class Emulator {
         private var SVBK: UByte = 0x00u
         private var IE: UByte = 0x00u
 
+        private var RAMEnable: UByte = 0x00u
+        private var ROMBankNumber: UByte = 0x01u // 5 bits
+        private var RAMBankNumber: UByte = 0x01u // 2 bits
+        private var bankingMode: UByte = 0x00u // 1 bit
+
         operator fun get(addr: UShort): UByte = when (addr.toInt()) {
-            in 0x0000..0x7FFF -> rom!![addr.toInt()]
+            in 0x0000..0x3FFF -> when (cartridgeHeader!!.cartridgeType) {
+                `ROM ONLY` -> rom!![addr.toInt()]
+                MBC1 -> when (bankingMode.toInt()) {
+                    0 -> rom!![addr.toInt()]
+                    1 -> TODO()
+                    else -> throw IllegalArgumentException()
+                }
+                else -> TODO()
+            }
+            in 0x4000..0x7FFF -> when (cartridgeHeader!!.cartridgeType) {
+                `ROM ONLY` -> rom!![addr.toInt()]
+                MBC1 -> when (ROMBankNumber.toInt()) {
+                    0x00 -> rom!![addr.toInt()]
+                    in 0x01..0x1F -> rom!![addr.toInt() + (ROMBankNumber.toInt() - 1) * MEMORY_BANK_SIZE]
+                    else -> throw IllegalArgumentException()
+                }
+                else -> TODO()
+            }
+            in 0x8000..0x9FFF -> TODO("VRAM")
+            in 0xA000..0xBFFF -> TODO("External RAM")
             in 0xC000..0xCFFF -> wram0[addr.toInt() - 0xC000]
             in 0xD000..0xDFFF -> wram1[addr.toInt() - 0xD000]
+            in 0xE000..0xFDFF -> get((addr.toUInt() - 0xE000u).toUShort()) // ECHO RAM
+            in 0xFE00..0xFE9F -> TODO("OAM")
+            in 0xFEA0..0xFEFF -> TODO("Not Usable")
             in 0xFF00..0xFF7F, 0xFFFF -> getIORegisters(addr)
+            in 0xFF80..0xFFFE -> TODO("HRAM")
             else -> TODO()
         }
 
         operator fun set(addr: UShort, value: UByte) = when (addr.toInt()) {
+            in 0x0000..0x7FFF -> when (cartridgeHeader!!.cartridgeType) {
+                `ROM ONLY` -> throw IllegalArgumentException()
+                MBC1 -> when (addr.toInt()) {
+                    in 0x0000..0x1FFF -> RAMEnable = (value.toUInt() and 0b00001111u).toUByte()
+                    in 0x2000..0x3FFF -> ROMBankNumber = (value.toUInt() and 0b00011111u).toUByte()
+                    in 0x4000..0x5FFF -> RAMBankNumber = (value.toUInt() and 0b00000011u).toUByte()
+                    in 0x6000..0x7FFF -> bankingMode = (value.toUInt() and 0b00000001u).toUByte()
+                    else -> throw IllegalArgumentException()
+                }
+                else -> TODO()
+            }
+            in 0x8000..0x9FFF -> TODO("VRAM")
+            in 0xA000..0xBFFF -> TODO("External RAM")
             in 0xC000..0xCFFF -> wram0[addr.toInt() - 0xC000] = value
             in 0xD000..0xDFFF -> wram1[addr.toInt() - 0xD000] = value
+            in 0xE000..0xFDFF -> wram0[addr.toInt() - 0xE000] = value // ECHO RAM
+            in 0xFE00..0xFE9F -> TODO("OAM")
+            in 0xFEA0..0xFEFF -> TODO("Not Usable")
             in 0xFF00..0xFF7F, 0xFFFF -> setIORegisters(addr, value)
+            in 0xFF80..0xFFFE -> TODO("HRAM")
             else -> TODO()
         }
 
@@ -361,6 +410,7 @@ class Emulator {
         }
     private var SP: UShort = 0x0000u
     private fun pushStack(addr: UShort) {
+        log.debug(String.format("\tpushStack=%04X", addr.toInt()))
         SP--
         memory[SP] = hi8(addr)
         SP--
@@ -372,7 +422,9 @@ class Emulator {
         SP++
         val hi = memory[SP]
         SP++
-        return u16(hi, lo)
+        return u16(hi, lo).also {
+            log.debug(String.format("\tpopStack=%04X", it.toInt()))
+        }
     }
 
     internal var PC: UShort = 0x0000u
@@ -490,7 +542,7 @@ class Emulator {
 
     // Instructions
     fun ld8(dst: Ref8, src: Ref8): Int {
-        log.debug("LD8\t${dst.name}\t${src.name}")
+        log.debug("ld8\t${dst.name}\t${src.name}")
         set8(dst, get8(src))
         return when (src) {
             Ref8.refBC, Ref8.refDE, Ref8.refHL -> when (dst) {
@@ -530,7 +582,7 @@ class Emulator {
     }
 
     fun ldi8(dst: Ref8, src: Ref8): Int {
-        log.debug("LDI8\t${dst.name}\t${src.name}")
+        log.debug("ldi8\t${dst.name}\t${src.name}")
         ld8(dst, src)
         inc16(Ref16.HL)
         return when {
@@ -540,7 +592,7 @@ class Emulator {
     }
 
     fun ldd8(dst: Ref8, src: Ref8): Int {
-        log.debug("LDD8\t${dst.name}\t${src.name}")
+        log.debug("ldd8\t${dst.name}\t${src.name}")
         ld8(dst, src)
         dec16(Ref16.HL)
         return when {
@@ -550,7 +602,7 @@ class Emulator {
     }
 
     fun ld16(dst: Ref16, src: Ref16): Int {
-        log.debug("LD16\t${dst.name}\t${src.name}")
+        log.debug("ld16\t${dst.name}\t${src.name}")
         set16(dst, get16(src))
         return when (src) {
             Ref16.SP -> when (dst) {
@@ -582,19 +634,16 @@ class Emulator {
     }
 
     fun push16(ref16: Ref16): Int {
-        log.debug("PUSH16\t${ref16.name}")
-        val addr = SP
+        log.debug("push16\t${ref16.name}")
         val nn = get16(ref16)
-        memory[addr] = lo8(nn)
-        memory[add16(addr, 1u).first] = hi8(nn)
-        sub16(Ref16.SP, 2u)
+        pushStack(nn)
         return 16
     }
 
     fun pop16(ref16: Ref16): Int {
-        log.debug("POP16\t${ref16.name}")
-        set16(ref16, SP)
-        add16(Ref16.SP, 2u)
+        log.debug("pop16\t${ref16.name}")
+        val sp = popStack()
+        set16(ref16, sp)
         return 16
     }
 
@@ -695,7 +744,7 @@ class Emulator {
 
     // z13-
     fun dec8(r: Ref8): Int {
-        log.debug("DEC8\t${r.name}")
+        log.debug("dec8\t${r.name}")
         val (res, _, halfCarry) = sub8(get8(r), 1u)
         set8(r, res)
         flagZ = res.equals(0u)
@@ -995,7 +1044,7 @@ class Emulator {
 
     fun jp(fc: FlagCondition): Int {
         val addr = read16()
-        log.debug("JP\t${fc.name}\t${addr.toUInt().toString(16)}")
+        log.debug("jp\t${fc.name}\t${addr.toUInt().toString(16)}")
         if (evaluate(fc)) {
             PC = addr
             return 16
@@ -1037,6 +1086,7 @@ class Emulator {
     }
 
     fun ret(fc: FlagCondition): Int {
+        log.debug("ret\t${fc.name}")
         if (evaluate(fc)) {
             PC = popStack()
             return 20
@@ -1067,7 +1117,7 @@ class Emulator {
     private fun loadROM(romFile: File) {
         rom = romFile.readBytes().asUByteArray()
         log.info("rom.size=${rom!!.size}")
-        parseCartridgeHeader()
+        cartridgeHeader = parseCartridgeHeader()
     }
 
     data class CartridgeHeader(
@@ -1107,6 +1157,7 @@ class Emulator {
             `BANDAI TAMA5`(0xFDu),
             `HuC3`(0xFEu),
             `HuC1+RAM+BATTERY`(0xFFu);
+
             companion object {
                 fun of(code: UByte) = values().find { it.code == code }!!
             }
@@ -1125,6 +1176,7 @@ class Emulator {
             `1_1 MByte`(0x52u, 72),
             `1_2 MByte`(0x53u, 80),
             `1_5 MByte`(0x54u, 96);
+
             companion object {
                 fun of(code: UByte) = values().find { it.code == code }!!
             }
@@ -1137,6 +1189,7 @@ class Emulator {
             `32 KB`(0x03u),
             `128 KB`(0x04u),
             `64 KB`(0x05u);
+
             companion object {
                 fun of(code: UByte) = values().find { it.code == code }!!
             }
@@ -1151,8 +1204,8 @@ class Emulator {
         return x.toUByte()
     }
 
-    private fun parseCartridgeHeader() {
-        cartridgeHeader = CartridgeHeader(
+    private fun parseCartridgeHeader(): CartridgeHeader {
+        val cartridgeHeader = CartridgeHeader(
             (0x0134..0x0143).map {
                 rom!![it].toInt().toChar()
             }.joinToString("").trimEnd { it.code == 0 },
@@ -1165,6 +1218,7 @@ class Emulator {
         if (cartridgeHeader!!.headerChecksum != rom!![0x014D]) {
             throw RuntimeException()
         }
+        return cartridgeHeader
     }
 
     private fun initializeRegisters() {
