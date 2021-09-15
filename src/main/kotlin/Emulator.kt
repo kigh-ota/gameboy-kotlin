@@ -37,6 +37,7 @@ class Emulator {
 
         private val wram0 = UByteArray(0x1000)
         private val wram1 = UByteArray(0x1000)
+        private val hram = UByteArray(127)
 
         // I/O registers
         private var P1: UByte = 0x00u
@@ -127,7 +128,7 @@ class Emulator {
             in 0xFE00..0xFE9F -> TODO("OAM")
             in 0xFEA0..0xFEFF -> TODO("Not Usable")
             in 0xFF00..0xFF7F, 0xFFFF -> getIORegisters(addr)
-            in 0xFF80..0xFFFE -> TODO("HRAM")
+            in 0xFF80..0xFFFE -> hram[addr.toInt() - 0xFF80]
             else -> TODO()
         }
 
@@ -151,7 +152,7 @@ class Emulator {
             in 0xFE00..0xFE9F -> TODO("OAM")
             in 0xFEA0..0xFEFF -> TODO("Not Usable")
             in 0xFF00..0xFF7F, 0xFFFF -> setIORegisters(addr, value)
-            in 0xFF80..0xFFFE -> TODO("HRAM")
+            in 0xFF80..0xFFFE -> hram[addr.toInt() - 0xFF80] = value // HRAM
             else -> TODO()
         }
 
@@ -276,7 +277,12 @@ class Emulator {
         fun initialize() {
             wram0.fill(0u)
             wram1.fill(0u)
+            hram.fill(0u)
             initializeHardwareRegisters()
+            RAMEnable = 0x00u
+            ROMBankNumber = 0x01u
+            RAMBankNumber = 0x01u
+            bankingMode = 0x00u
         }
 
         private fun initializeHardwareRegisters() {
