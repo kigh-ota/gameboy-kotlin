@@ -8,106 +8,6 @@ class Emulator {
         private const val BIT_N = 6
         private const val BIT_H = 5
         private const val BIT_C = 4
-
-        private fun mask(b: Int) = 1u shl b
-
-        /**
-         * b must be in 0..7
-         */
-        private fun bit8(v: UByte, b: Int) = (v.toUInt() shr b) and 1u == 1u
-        private fun bit8(v: UByte, b: Int, set: Boolean) = when (set) {
-            true -> (v.toUInt() or mask(b)).toUByte()
-            false -> (v.toUInt() and mask(b).inv()).toUByte()
-        }
-
-        /**
-         * b must be in 0..15
-         */
-        private fun bit16(v: UShort, b: Int) = (v.toUInt() shr b) and 1u == 1u
-
-        private fun u16(hi: UByte, lo: UByte) = (lo.toUInt() or (hi.toUInt() shl 8)).toUShort()
-        private fun hi8(v: UShort) = ((v.toUInt() and 0xFF00u) shr 8).toUByte()
-        private fun lo8(v: UShort) = (v.toUInt() and 0x00FFu).toUByte()
-        internal fun add16(v: UShort, w: UShort): Triple<UShort, Boolean, Boolean> {
-            val t = v + w
-            val overflow = t > UShort.MAX_VALUE
-            val carryFromBit7 = bit16(
-                (((v.toUInt() and 0x00FFu) + (w.toUInt() and 0x00FFu)).toUShort()), 8
-            )
-            return Triple(t.toUShort(), overflow, carryFromBit7)
-        }
-
-        internal fun sub16(v: UShort, w: UShort): Pair<UShort, Boolean> {
-            val t = v.toInt() - w.toInt()
-            val underflow = t < 0
-            return Pair(t.toUShort(), underflow)
-        }
-
-        internal fun add8(v: UShort, d: Byte): Triple<UShort, Boolean, Boolean> {
-            val t = v.toInt() + d
-            val carryFromBit3 =
-                bit16((((v.toUInt() and 0x000Fu) + (d.toUInt() and 0x000Fu)).toUShort()), 4)
-            val carryFromBit7 =
-                bit16((((v.toUInt() and 0x00FFu) + (d.toUInt() and 0x00FFu)).toUShort()), 8)
-            return Triple(t.toUShort(), carryFromBit7, carryFromBit3)
-        }
-
-        internal fun add8(v: UByte, w: UByte): Triple<UByte, Boolean, Boolean> {
-            val t = v + w
-            val overflow = t > UByte.MAX_VALUE
-            val carryFromBit3 =
-                bit8((((v.toUInt() and 0x0Fu) + (w.toUInt() and 0x0Fu)).toUByte()), 4)
-            return Triple(t.toUByte(), overflow, carryFromBit3)
-        }
-
-        internal fun adc8(v: UByte, w: UByte, c: Boolean): Triple<UByte, Boolean, Boolean> {
-            val x = if (c) 1u else 0u
-            val t = v + w + x
-            val overflow = t > UByte.MAX_VALUE
-            val carryFromBit3 =
-                bit8((((v.toUInt() and 0x0Fu) + (w.toUInt() and 0x0Fu) + x).toUByte()), 4)
-            return Triple(t.toUByte(), overflow, carryFromBit3)
-        }
-
-        internal fun sub8(v: UByte, w: UByte): Triple<UByte, Boolean, Boolean> {
-            val t = v.toInt() - w.toInt()
-            val underflow = t < 0
-            val halfCarry = ((v.toUInt() and 0x0Fu) - (w.toUInt() and 0x0Fu)) and 0x10u == 0x10u
-            return Triple(t.toUByte(), underflow, halfCarry)
-        }
-
-        internal fun sbc8(v: UByte, w: UByte, c: Boolean): Triple<UByte, Boolean, Boolean> {
-            val x = if (c) 1u else 0u
-            val t = v.toInt() - w.toInt() - x.toInt()
-            val underflow = t < 0
-            val halfCarry = ((v.toUInt() and 0x0Fu) - (w.toUInt() and 0x0Fu) - x) and 0x10u == 0x10u
-            return Triple(t.toUByte(), underflow, halfCarry)
-        }
-
-        private fun rlc8(v: UByte): Pair<UByte, Boolean> {
-            val oldBit7 = bit8(v, 7)
-            val result = ((v.toUInt() shl 1) or (if (oldBit7) mask(0) else 0u)).toUByte()
-            return Pair(result, oldBit7)
-        }
-
-        private fun rl8(v: UByte, c: Boolean): Pair<UByte, Boolean> {
-            val oldBit7 = bit8(v, 7)
-            val result = ((v.toUInt() shl 1) or (if (c) mask(0) else 0u)).toUByte()
-            return Pair(result, oldBit7)
-        }
-
-        private fun rrc8(v: UByte): Pair<UByte, Boolean> {
-            val oldBit0 = bit8(v, 0)
-            val result = ((v.toUInt() shr 1) or (if (oldBit0) mask(7) else 0u)).toUByte()
-            return Pair(result, oldBit0)
-        }
-
-        private fun rr8(v: UByte, c: Boolean): Pair<UByte, Boolean> {
-            val oldBit0 = bit8(v, 0)
-            val result = ((v.toUInt() shr 1) or (if (c) mask(7) else 0u)).toUByte()
-            return Pair(result, oldBit0)
-        }
-
     }
 
     private val log = LoggerFactory.getLogger(javaClass.name)
@@ -1339,4 +1239,103 @@ class Emulator {
         cycleCounter += cycles
         return cycles
     }
+}
+
+private fun mask(b: Int) = 1u shl b
+
+/**
+ * b must be in 0..7
+ */
+private fun bit8(v: UByte, b: Int) = (v.toUInt() shr b) and 1u == 1u
+private fun bit8(v: UByte, b: Int, set: Boolean) = when (set) {
+    true -> (v.toUInt() or mask(b)).toUByte()
+    false -> (v.toUInt() and mask(b).inv()).toUByte()
+}
+
+/**
+ * b must be in 0..15
+ */
+private fun bit16(v: UShort, b: Int) = (v.toUInt() shr b) and 1u == 1u
+
+private fun u16(hi: UByte, lo: UByte) = (lo.toUInt() or (hi.toUInt() shl 8)).toUShort()
+private fun hi8(v: UShort) = ((v.toUInt() and 0xFF00u) shr 8).toUByte()
+private fun lo8(v: UShort) = (v.toUInt() and 0x00FFu).toUByte()
+internal fun add16(v: UShort, w: UShort): Triple<UShort, Boolean, Boolean> {
+    val t = v + w
+    val overflow = t > UShort.MAX_VALUE
+    val carryFromBit7 = bit16(
+        (((v.toUInt() and 0x00FFu) + (w.toUInt() and 0x00FFu)).toUShort()), 8
+    )
+    return Triple(t.toUShort(), overflow, carryFromBit7)
+}
+
+internal fun sub16(v: UShort, w: UShort): Pair<UShort, Boolean> {
+    val t = v.toInt() - w.toInt()
+    val underflow = t < 0
+    return Pair(t.toUShort(), underflow)
+}
+
+internal fun add8(v: UShort, d: Byte): Triple<UShort, Boolean, Boolean> {
+    val t = v.toInt() + d
+    val carryFromBit3 =
+        bit16((((v.toUInt() and 0x000Fu) + (d.toUInt() and 0x000Fu)).toUShort()), 4)
+    val carryFromBit7 =
+        bit16((((v.toUInt() and 0x00FFu) + (d.toUInt() and 0x00FFu)).toUShort()), 8)
+    return Triple(t.toUShort(), carryFromBit7, carryFromBit3)
+}
+
+internal fun add8(v: UByte, w: UByte): Triple<UByte, Boolean, Boolean> {
+    val t = v + w
+    val overflow = t > UByte.MAX_VALUE
+    val carryFromBit3 =
+        bit8((((v.toUInt() and 0x0Fu) + (w.toUInt() and 0x0Fu)).toUByte()), 4)
+    return Triple(t.toUByte(), overflow, carryFromBit3)
+}
+
+internal fun adc8(v: UByte, w: UByte, c: Boolean): Triple<UByte, Boolean, Boolean> {
+    val x = if (c) 1u else 0u
+    val t = v + w + x
+    val overflow = t > UByte.MAX_VALUE
+    val carryFromBit3 =
+        bit8((((v.toUInt() and 0x0Fu) + (w.toUInt() and 0x0Fu) + x).toUByte()), 4)
+    return Triple(t.toUByte(), overflow, carryFromBit3)
+}
+
+internal fun sub8(v: UByte, w: UByte): Triple<UByte, Boolean, Boolean> {
+    val t = v.toInt() - w.toInt()
+    val underflow = t < 0
+    val halfCarry = ((v.toUInt() and 0x0Fu) - (w.toUInt() and 0x0Fu)) and 0x10u == 0x10u
+    return Triple(t.toUByte(), underflow, halfCarry)
+}
+
+internal fun sbc8(v: UByte, w: UByte, c: Boolean): Triple<UByte, Boolean, Boolean> {
+    val x = if (c) 1u else 0u
+    val t = v.toInt() - w.toInt() - x.toInt()
+    val underflow = t < 0
+    val halfCarry = ((v.toUInt() and 0x0Fu) - (w.toUInt() and 0x0Fu) - x) and 0x10u == 0x10u
+    return Triple(t.toUByte(), underflow, halfCarry)
+}
+
+private fun rlc8(v: UByte): Pair<UByte, Boolean> {
+    val oldBit7 = bit8(v, 7)
+    val result = ((v.toUInt() shl 1) or (if (oldBit7) mask(0) else 0u)).toUByte()
+    return Pair(result, oldBit7)
+}
+
+private fun rl8(v: UByte, c: Boolean): Pair<UByte, Boolean> {
+    val oldBit7 = bit8(v, 7)
+    val result = ((v.toUInt() shl 1) or (if (c) mask(0) else 0u)).toUByte()
+    return Pair(result, oldBit7)
+}
+
+private fun rrc8(v: UByte): Pair<UByte, Boolean> {
+    val oldBit0 = bit8(v, 0)
+    val result = ((v.toUInt() shr 1) or (if (oldBit0) mask(7) else 0u)).toUByte()
+    return Pair(result, oldBit0)
+}
+
+private fun rr8(v: UByte, c: Boolean): Pair<UByte, Boolean> {
+    val oldBit0 = bit8(v, 0)
+    val result = ((v.toUInt() shr 1) or (if (c) mask(7) else 0u)).toUByte()
+    return Pair(result, oldBit0)
 }
