@@ -201,12 +201,12 @@ class Emulator {
 
         operator fun set(addr: UShort, value: UByte) = when (addr.toInt()) {
             in 0xC000..0xCFFF -> wram0[addr.toInt() - 0xC000] = value
-            in 0xD000..0xDFFF-> wram1[addr.toInt() - 0xD000] = value
+            in 0xD000..0xDFFF -> wram1[addr.toInt() - 0xD000] = value
             in 0xFF00..0xFF7F, 0xFFFF -> setIORegisters(addr, value)
             else -> TODO()
         }
 
-        private fun getIORegisters(addr: UShort) = when(addr.toInt()) {
+        private fun getIORegisters(addr: UShort) = when (addr.toInt()) {
             0xFF00 -> P1
             0xFF01 -> SB
             0xFF02 -> SC
@@ -265,7 +265,7 @@ class Emulator {
             else -> throw IllegalArgumentException()
         }
 
-        private fun setIORegisters(addr: UShort, value: UByte) = when(addr.toInt()) {
+        private fun setIORegisters(addr: UShort, value: UByte) = when (addr.toInt()) {
             0xFF00 -> P1 = value
             0xFF01 -> SB = value
             0xFF02 -> SC = value
@@ -392,6 +392,7 @@ class Emulator {
     private val memory = Memory()
 
     private var rom: UByteArray? = null
+    private var cartridgeHeader: CartridgeHeader? = null
 
     // Registers
     private var A: UByte = 0x00u
@@ -1151,6 +1152,8 @@ class Emulator {
     }
 
     fun start(romFile: File) {
+        rom = null
+        cartridgeHeader = null
         initializeRegisters()
         memory.initialize()
         loadROM(romFile)
@@ -1164,6 +1167,104 @@ class Emulator {
     private fun loadROM(romFile: File) {
         rom = romFile.readBytes().asUByteArray()
         log.info("rom.size=${rom!!.size}")
+        parseCartridgeHeader()
+    }
+
+    data class CartridgeHeader(
+        val title: String,
+        val cartridgeType: CartridgeType,
+        val romSize: ROMSize,
+        val ramSize: RAMSize,
+        val headerChecksum: UByte
+    ) {
+
+        enum class CartridgeType(private val code: UByte) {
+            `ROM ONLY`(0x00u),
+            `MBC1`(0x01u),
+            `MBC1+RAM`(0x02u),
+            `MBC1+RAM+BATTERY`(0x03u),
+            `MBC2`(0x05u),
+            `MBC2+BATTERY`(0x06u),
+            `ROM+RAM 1`(0x08u),
+            `ROM+RAM+BATTERY 1`(0x09u),
+            `MMM01`(0x0Bu),
+            `MMM01+RAM`(0x0Cu),
+            `MMM01+RAM+BATTERY`(0x0Du),
+            `MBC3+TIMER+BATTERY`(0x0Fu),
+            `MBC3+TIMER+RAM+BATTERY 2`(0x10u),
+            `MBC3`(0x11u),
+            `MBC3+RAM 2`(0x12u),
+            `MBC3+RAM+BATTERY 2`(0x13u),
+            `MBC5`(0x19u),
+            `MBC5+RAM`(0x1Au),
+            `MBC5+RAM+BATTERY`(0x1Bu),
+            `MBC5+RUMBLE`(0x1Cu),
+            `MBC5+RUMBLE+RAM`(0x1Du),
+            `MBC5+RUMBLE+RAM+BATTERY`(0x1Eu),
+            `MBC6`(0x20u),
+            `MBC7+SENSOR+RUMBLE+RAM+BATTERY`(0x22u),
+            `POCKET CAMERA`(0xFCu),
+            `BANDAI TAMA5`(0xFDu),
+            `HuC3`(0xFEu),
+            `HuC1+RAM+BATTERY`(0xFFu);
+            companion object {
+                fun of(code: UByte) = values().find { it.code == code }!!
+            }
+        }
+
+        enum class ROMSize(private val code: UByte, nBanks: Int) {
+            `32 KByte`(0x00u, 2),
+            `64 KByte`(0x01u, 4),
+            `128 KByte`(0x02u, 8),
+            `256 KByte`(0x03u, 16),
+            `512 KByte`(0x04u, 32),
+            `1 MByte`(0x05u, 64),
+            `2 MByte`(0x06u, 128),
+            `4 MByte`(0x07u, 256),
+            `8 MByte`(0x08u, 512),
+            `1_1 MByte`(0x52u, 72),
+            `1_2 MByte`(0x53u, 80),
+            `1_5 MByte`(0x54u, 96);
+            companion object {
+                fun of(code: UByte) = values().find { it.code == code }!!
+            }
+        }
+
+        enum class RAMSize(private val code: UByte) {
+            `0`(0x00u),
+            `-`(0x01u),
+            `8 KB`(0x02u),
+            `32 KB`(0x03u),
+            `128 KB`(0x04u),
+            `64 KB`(0x05u);
+            companion object {
+                fun of(code: UByte) = values().find { it.code == code }!!
+            }
+        }
+    }
+
+    private fun calculateHeaderChecksum(): UByte {
+        var x = 0u
+        (0x0134..0x014C).forEach {
+            x = x - rom!![it].toUInt() - 1u
+        }
+        return x.toUByte()
+    }
+
+    private fun parseCartridgeHeader() {
+        cartridgeHeader = CartridgeHeader(
+            (0x0134..0x0143).map {
+                rom!![it].toInt().toChar()
+            }.joinToString("").trimEnd { it.code == 0 },
+            CartridgeHeader.CartridgeType.of(rom!![0x0147]),
+            CartridgeHeader.ROMSize.of(rom!![0x0148]),
+            CartridgeHeader.RAMSize.of(rom!![0x0149]),
+            calculateHeaderChecksum(),
+        )
+        log.debug(cartridgeHeader!!.toString())
+        if (cartridgeHeader!!.headerChecksum != rom!![0x014D]) {
+            throw RuntimeException()
+        }
     }
 
     private fun initializeRegisters() {
